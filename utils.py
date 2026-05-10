@@ -299,15 +299,22 @@ class BceDiceLoss(nn.Module):
     
 
 class GT_BceDiceLoss(nn.Module):
-    def __init__(self, wb=1, wd=1):
+    def __init__(self, wb=1, wd=1, wbdy=0.1):
         super(GT_BceDiceLoss, self).__init__()
         self.bcedice = BceDiceLoss(wb, wd)
+        self.wbdy = wbdy
+
+    def _soft_boundary(self, mask):
+        dilated = F.max_pool2d(mask, kernel_size=3, stride=1, padding=1)
+        eroded = -F.max_pool2d(-mask, kernel_size=3, stride=1, padding=1)
+        return dilated - eroded
 
     def forward(self, gt_pre, out, target):
         bcediceloss = self.bcedice(out, target)
         gt_pre5, gt_pre4, gt_pre3, gt_pre2, gt_pre1 = gt_pre
         gt_loss = self.bcedice(gt_pre5, target) * 0.1 + self.bcedice(gt_pre4, target) * 0.2 + self.bcedice(gt_pre3, target) * 0.3 + self.bcedice(gt_pre2, target) * 0.4 + self.bcedice(gt_pre1, target) * 0.5
-        return bcediceloss + gt_loss
+        boundary_loss = self.bcedice(self._soft_boundary(out), self._soft_boundary(target))
+        return bcediceloss + gt_loss + self.wbdy * boundary_loss
 
 
 
