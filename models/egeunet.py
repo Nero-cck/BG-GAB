@@ -44,10 +44,11 @@ class LayerNorm(nn.Module):
             return x
     
 
-class group_aggregation_bridge(nn.Module):
+class boundary_guided_group_aggregation_bridge(nn.Module):
     def __init__(self, dim_xh, dim_xl, k_size=3, d_list=[1,2,5,7]):
         super().__init__()
         self.pre_project = nn.Conv2d(dim_xh, dim_xl, 1)
+        self.boundary_alpha = nn.Parameter(torch.zeros(1))
         group_size = dim_xl // 2
         in_group_channels = group_size + 1
         self.g0 = nn.Sequential(
@@ -79,12 +80,18 @@ class group_aggregation_bridge(nn.Module):
             nn.Conv2d(dim_xl * 2 + 4, dim_xl, 1)
         )
 
+    def _soft_boundary(self, mask):
+        mask = torch.sigmoid(mask)
+        dilated = F.max_pool2d(mask, kernel_size=3, stride=1, padding=1)
+        eroded = -F.max_pool2d(-mask, kernel_size=3, stride=1, padding=1)
+        return dilated - eroded
+
     def forward(self, xh, xl, mask):
         xh = self.pre_project(xh)
         xh = F.interpolate(xh, size=[xl.size(2), xl.size(3)], mode ='bilinear', align_corners=True)
         if mask.size(2) != xl.size(2) or mask.size(3) != xl.size(3):
             mask = F.interpolate(mask, size=[xl.size(2), xl.size(3)], mode ='bilinear', align_corners=True)
-        guide = mask
+        guide = mask + self.boundary_alpha * self._soft_boundary(mask)
         xh = torch.chunk(xh, 4, dim=1)
         xl = torch.chunk(xl, 4, dim=1)
         x0 = self.g0(torch.cat((xh[0], xl[0], guide), dim=1))
@@ -190,12 +197,12 @@ class EGEUNet(nn.Module):
         )
 
         if bridge: 
-            self.GAB1 = group_aggregation_bridge(c_list[1], c_list[0])
-            self.GAB2 = group_aggregation_bridge(c_list[2], c_list[1])
-            self.GAB3 = group_aggregation_bridge(c_list[3], c_list[2])
-            self.GAB4 = group_aggregation_bridge(c_list[4], c_list[3])
-            self.GAB5 = group_aggregation_bridge(c_list[5], c_list[4])
-            print('group_aggregation_bridge was used')
+            self.GAB1 = boundary_guided_group_aggregation_bridge(c_list[1], c_list[0])
+            self.GAB2 = boundary_guided_group_aggregation_bridge(c_list[2], c_list[1])
+            self.GAB3 = boundary_guided_group_aggregation_bridge(c_list[3], c_list[2])
+            self.GAB4 = boundary_guided_group_aggregation_bridge(c_list[4], c_list[3])
+            self.GAB5 = boundary_guided_group_aggregation_bridge(c_list[5], c_list[4])
+            print('boundary_guided_group_aggregation_bridge was used')
         if gt_ds:
             self.gt_conv1 = nn.Sequential(nn.Conv2d(c_list[4], 1, 1))
             self.gt_conv2 = nn.Sequential(nn.Conv2d(c_list[3], 1, 1))
