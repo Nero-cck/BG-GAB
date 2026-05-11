@@ -6,6 +6,36 @@ from sklearn.metrics import confusion_matrix
 from utils import save_imgs
 
 
+def extract_boundary(mask, kernel_size=3):
+    pad = kernel_size // 2
+    mask = torch.from_numpy(mask).float().unsqueeze(0).unsqueeze(0)
+    dilated = torch.nn.functional.max_pool2d(mask, kernel_size=kernel_size, stride=1, padding=pad)
+    eroded = -torch.nn.functional.max_pool2d(-mask, kernel_size=kernel_size, stride=1, padding=pad)
+    boundary = (dilated - eroded).squeeze().numpy()
+    return np.where(boundary > 0, 1, 0)
+
+
+def cal_boundary_dice(preds, gts, threshold=0.5, kernel_size=3):
+    boundary_dices = []
+
+    for pred, gt in zip(preds, gts):
+        pred_mask = np.where(pred >= threshold, 1, 0)
+        gt_mask = np.where(gt >= 0.5, 1, 0)
+
+        pred_boundary = extract_boundary(pred_mask, kernel_size)
+        gt_boundary = extract_boundary(gt_mask, kernel_size)
+
+        intersection = np.sum(pred_boundary * gt_boundary)
+        denominator = np.sum(pred_boundary) + np.sum(gt_boundary)
+
+        if denominator == 0:
+            boundary_dices.append(1.0)
+        else:
+            boundary_dices.append((2.0 * intersection) / denominator)
+
+    return float(np.mean(boundary_dices))
+
+
 def train_one_epoch(train_loader,
                     model,
                     criterion, 
@@ -77,8 +107,12 @@ def val_one_epoch(test_loader,
             preds.append(out) 
 
     if epoch % config.val_interval == 0:
-        preds = np.array(preds).reshape(-1)
-        gts = np.array(gts).reshape(-1)
+        preds_arr = np.array(preds)
+        gts_arr = np.array(gts)
+        boundary_dice = cal_boundary_dice(preds_arr, gts_arr, config.threshold)
+
+        preds = preds_arr.reshape(-1)
+        gts = gts_arr.reshape(-1)
 
         y_pre = np.where(preds>=config.threshold, 1, 0)
         y_true = np.where(gts>=0.5, 1, 0)
@@ -92,7 +126,7 @@ def val_one_epoch(test_loader,
         f1_or_dsc = float(2 * TP) / float(2 * TP + FP + FN) if float(2 * TP + FP + FN) != 0 else 0
         miou = float(TP) / float(TP + FP + FN) if float(TP + FP + FN) != 0 else 0
 
-        log_info = f'val epoch: {epoch}, loss: {np.mean(loss_list):.4f}, miou: {miou}, f1_or_dsc: {f1_or_dsc}, accuracy: {accuracy}, \
+        log_info = f'val epoch: {epoch}, loss: {np.mean(loss_list):.4f}, miou: {miou}, f1_or_dsc: {f1_or_dsc}, boundary_dice: {boundary_dice}, accuracy: {accuracy}, \
                 specificity: {specificity}, sensitivity: {sensitivity}, confusion_matrix: {confusion}'
         print(log_info)
         logger.info(log_info)
@@ -134,8 +168,12 @@ def test_one_epoch(test_loader,
             if i % config.save_interval == 0:
                 save_imgs(img, msk, out, i, config.work_dir + 'outputs/', config.datasets, config.threshold, test_data_name=test_data_name)
 
-        preds = np.array(preds).reshape(-1)
-        gts = np.array(gts).reshape(-1)
+        preds_arr = np.array(preds)
+        gts_arr = np.array(gts)
+        boundary_dice = cal_boundary_dice(preds_arr, gts_arr, config.threshold)
+
+        preds = preds_arr.reshape(-1)
+        gts = gts_arr.reshape(-1)
 
         y_pre = np.where(preds>=config.threshold, 1, 0)
         y_true = np.where(gts>=0.5, 1, 0)
@@ -153,7 +191,7 @@ def test_one_epoch(test_loader,
             log_info = f'test_datasets_name: {test_data_name}'
             print(log_info)
             logger.info(log_info)
-        log_info = f'test of best model, loss: {np.mean(loss_list):.4f},miou: {miou}, f1_or_dsc: {f1_or_dsc}, accuracy: {accuracy}, \
+        log_info = f'test of best model, loss: {np.mean(loss_list):.4f},miou: {miou}, f1_or_dsc: {f1_or_dsc}, boundary_dice: {boundary_dice}, accuracy: {accuracy}, \
                 specificity: {specificity}, sensitivity: {sensitivity}, confusion_matrix: {confusion}'
         print(log_info)
         logger.info(log_info)
