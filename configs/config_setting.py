@@ -35,7 +35,7 @@ class setting_config:
     distributed = False
     local_rank = -1
     num_workers = 0
-    seed = 42
+    seed = 3407
     world_size = None
     rank = None
     amp = False
