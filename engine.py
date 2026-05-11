@@ -8,6 +8,7 @@ from utils import save_imgs
 
 def extract_boundary(mask, kernel_size=3):
     pad = kernel_size // 2
+    mask = np.squeeze(mask)
     mask = torch.from_numpy(mask).float().unsqueeze(0).unsqueeze(0)
     dilated = torch.nn.functional.max_pool2d(mask, kernel_size=kernel_size, stride=1, padding=pad)
     eroded = -torch.nn.functional.max_pool2d(-mask, kernel_size=kernel_size, stride=1, padding=pad)
